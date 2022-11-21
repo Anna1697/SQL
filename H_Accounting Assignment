@@ -1,0 +1,227 @@
+
+
+use accounting;
+
+
+delimiter $$ 
+drop procedure if exists accounting.profit_and_loss;
+
+
+delimiter $$ 
+create procedure profit_and_loss(in calendaryear INT)
+begin
+drop table if exists table2;
+create table table2 as (
+	with a as (select  account_id, profit_loss_order, profit_loss_section_id
+                  from cloud_account),
+     s as (select statement_section_id, statement_section_code, statement_section_order, debit_is_positive, statement_section
+                  from cloud_statement_section),   
+     jeli as (select journal_entry_id, account_id, ifnull(debit,0) as debit, ifnull (credit,0) as credit
+                  from cloud_journal_entry_line_item),
+	 je as (select journal_entry_id, journal_entry_code, entry_date, debit_credit_balanced, cancelled
+                  from cloud_journal_entry)
+ 
+ 
+ -- Join the  tables                
+  SELECT *
+  from a
+  LEFT JOIN s 
+  on a.profit_loss_section_id = s.statement_section_id
+  left join jeli
+  using (account_id)
+  left join je 
+  using (journal_entry_id)
+  );
+  
+
+-- REVENUES
+ select sum(credit) INTO @Revenues
+ from table2
+ where statement_section_code = 'REV'
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+  -- REVENUES -1
+ select sum(credit) INTO @Revenues_py
+ from table2
+ where statement_section_code = 'REV'
+ AND YEAR(entry_date)= calendaryear-1 
+ AND cancelled =0;
+ 
+SET @perc_Revenues = IFNULL((((@Revenues - @Revenues_py)/@Revenues_py)*100),0);
+
+
+ -- RETURNS, REFUNDS, DISCOUNTS as RRD
+  select sum(debit) INTO @RRD
+ from table2
+ where statement_section_code = 'RET'
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+  -- RETURNS, REFUNDS, DISCOUNTS as RRD -1 
+  select sum(debit) INTO @RRD_py
+ from table2
+ where statement_section_code = 'RET'
+ AND YEAR(entry_date)= calendaryear-1;
+
+SET @perc_RRD = IFNULL((((@RRD - @RRD_py)/@RRD_py)*100),0);
+ 
+ 
+ -- COGS
+   select sum(debit) INTO @COGS
+ from table2
+ where statement_section_code = 'COGS'
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+  -- COGS -1 
+   select sum(debit) INTO @COGS_py
+ from table2
+where statement_section_code = 'COGS'
+ AND YEAR(entry_date)= calendaryear-1
+  AND cancelled =0;
+ 
+ SET @perc_COGS = IFNULL((((@COGS - @COGS_py)/@COGS_py)*100),0);
+ 
+ 
+  -- ADMINISTRATIVE EXPENSES as AE
+   select sum(debit) INTO @AE
+ from table2
+ where statement_section_code = 'GEXP'
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+  -- ADMINISTRATIVE EXPENSES as AE -1
+   select sum(debit) INTO @AE_py
+ from table2
+ where statement_section_code = 'GEXP'
+ AND YEAR(entry_date)= calendaryear-1
+  AND cancelled =0;
+ 
+ SET @perc_AE = IFNULL((((@AE - @AE_py)/@AE_py)*100),0);
+ 
+ 
+  -- SELLING EXPENSES as SE
+   select sum(debit) INTO @SE
+ from table2
+ where statement_section_code = 'SEXP'
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+  -- SELLING EXPENSES as SE -1
+   select sum(debit) INTO @SE_py
+ from table2
+ where statement_section_code = 'SEXP'
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+ 
+SET @perc_SE = IFNULL((((@SE - @SE_py)/@SE_py)*100),0);
+
+ 
+  -- OTHER EXPENSES as OE
+   select sum(debit) INTO @OE
+ from table2
+where statement_section_code = 'OEXP' 
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+     -- OTHER EXPENSES as OE -1
+   select  sum(debit) INTO @OE_py
+ from table2
+where statement_section_code = 'OEXP' 
+ AND YEAR(entry_date)= calendaryear-1
+  AND cancelled =0;
+ 
+  SET @perc_OE = IFNULL((((@OE - @OE_py)/@OE_py)*100),0);
+ 
+ -- OTHER INCOME as OI
+   select sum(credit) INTO @OI
+  from table2
+ where statement_section_code = 'OI' 
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+ -- OTHER INCOME as OI -1
+   select sum(credit) INTO @OI_py
+ from table2
+ where statement_section_code = 'OI' 
+ AND YEAR(entry_date)= calendaryear-1
+  AND cancelled =0;
+
+ SET @perc_OI = IFNULL((((@OI - @OI_py)/@OI_py)*100),0);
+ 
+ 
+  --  INCOME TAX as IT
+   select sum(debit)  INTO @IT
+  from table2
+where statement_section_code = 'INCTAX'  
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+ --  INCOME TAX as IT -1
+   select sum(debit) INTO @IT_py
+ from table2
+where statement_section_code = 'INCTAX'  
+ AND YEAR(entry_date)= calendaryear-1
+  AND cancelled =0;
+
+ SET @perc_IT = IFNULL((((@IT - @IT_py)/@IT_py)*100),0);
+ 
+ 
+  -- OTHER TAX as OT
+   select sum(debit) INTO @OT
+  from table2
+where statement_section_code = 'OTHTAX'   
+ AND YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+ 
+ -- OTHER TAX as OI -1
+   select sum(debit) INTO @OT_py
+ from table2
+where statement_section_code = 'OTHTAX'   
+ AND YEAR(entry_date)= calendaryear-1
+  AND cancelled =0;
+
+ SET @perc_OT = IFNULL((((@OT - @OT_py)/@OT_py)*100),0);
+ 
+ -- NET INCOME 
+    select (sum(debit) - sum(credit)) INTO @Net_income
+ from table2
+where YEAR(entry_date)= calendaryear
+  AND cancelled =0;
+  
+  -- NET INCOME -1
+    select (sum(debit)- sum(credit)) INTO @Net_income_py
+ from table2
+where YEAR(entry_date)= calendaryear-1
+  AND cancelled =0;
+
+SET @perc_Net_income = IFNULL((((@Net_income - @Net_income_py)/@Net_income_py)*100),0);
+
+-- Now let's set all the elements we want to include in the PL 
+
+ drop table if exists profit_loss_statement;
+ create table profit_loss_statement 
+				(CATEGORY VARCHAR(50), `YEAR-1` VARCHAR(50), `YEAR` VARCHAR(50), `% GROWTH` VARCHAR(50));
+  INSERT INTO profit_loss_statement (CATEGORY, `YEAR-1` , `YEAR`, `% GROWTH`)
+  values ('', 2015,2016, ''),
+         ('', '','', ''),
+		('Revenues', format(coalesce(@Revenues_py,0),0), format(coalesce(@Revenues,0),0), format(coalesce(@perc_Revenues,0),0)),
+       ('Returns, Refunds, Discounts',  format(coalesce(@RRD_py_py,0),0), format(coalesce(@RRD,0),0), format(coalesce(@perc_RRD,0),0)),
+       ('COGS',format(coalesce(@COGS,0),0), format(coalesce(@COGS_py,0),0), format(coalesce(@perc_COGS,0),0)),
+        ('Administrative Expenses',  format(coalesce(@AE_py,0),0),format(coalesce(@AE,0),0), format(coalesce(@perc_AE,0),0)),
+        ('Selling Expenses',  format(coalesce(@SE_py,0),0), format(coalesce(@SE,0),0), format(coalesce(@perc_SE,0),0)),
+        ('Other Expenses', format(coalesce(@OE_py,0),0),  format(coalesce(@OE,0),0), format(coalesce(@perc_OE,0),0)),
+        ('Other Income',  format(coalesce(@OI_py,0),0), format(coalesce(@OI,0),0), format(coalesce(@perc_OI,0),0)),
+         ('Income Tax',  format(coalesce(@IT_py,0),0), format(coalesce(@IT,0),0), format(coalesce(@perc_IT,0),0)),
+          ('Other Tax',  format(coalesce(@OT_py,0),0), format(coalesce(@OT,0),0), format(coalesce(@perc_OT,0),0)),
+          ('Net Income', format(coalesce(@Net_income_py,0),0), format(coalesce(@Net_income,0),0), format(coalesce(@perc_Net_income,0),0))
+        ;
+end $$
+delimiter ;
+ drop table if exists profit_loss_statement;
+
+call accounting.profit_and_loss(2016);
+
+select * from profit_loss_statement;
+
