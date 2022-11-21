@@ -1,12 +1,13 @@
+-- PROFIT AND LOSS --
 
-
+-- As some of the code were not possible to execute into H_Accounting we exported the H_Accounting database and import it into Local Instance.alter
+-- we called this new database 'accounting'
 use accounting;
-
 
 delimiter $$ 
 drop procedure if exists accounting.profit_and_loss;
 
-
+-- we created a procedure to build the profit & loss starting doing a table, cleaning data and join them.
 delimiter $$ 
 create procedure profit_and_loss(in calendaryear INT)
 begin
@@ -20,9 +21,9 @@ create table table2 as (
                   from cloud_journal_entry_line_item),
 	 je as (select journal_entry_id, journal_entry_code, entry_date, debit_credit_balanced, cancelled
                   from cloud_journal_entry)
- 
- 
- -- Join the  tables                
+    -- as H_server crashed we had to use also another server called H_cloud. So we imported the database into local instance and renamed the tables cloud_account, cloud_statement_section
+  -- cloud_journal_entry_line_item and cloud_journal_entry
+  
   SELECT *
   from a
   LEFT JOIN s 
@@ -33,11 +34,11 @@ create table table2 as (
   using (journal_entry_id)
   );
   
-
+ -- now we defined all the components of the profit and loss for the current year and previous year as well as the percentage growth.  
 -- REVENUES
  select sum(credit) INTO @Revenues
  from table2
- where statement_section_code = 'REV'
+ where statement_section_code = 'REV'     -- we filtered for the code of the elements of the P&L
  AND YEAR(entry_date)= calendaryear
   AND cancelled =0;
  
@@ -198,8 +199,7 @@ where YEAR(entry_date)= calendaryear-1
 
 SET @perc_Net_income = IFNULL((((@Net_income - @Net_income_py)/@Net_income_py)*100),0);
 
--- Now let's set all the elements we want to include in the PL 
-
+-- now let's set all the elements we want to include in the PL 
  drop table if exists profit_loss_statement;
  create table profit_loss_statement 
 				(CATEGORY VARCHAR(50), `YEAR-1` VARCHAR(50), `YEAR` VARCHAR(50), `% GROWTH` VARCHAR(50));
@@ -220,8 +220,223 @@ SET @perc_Net_income = IFNULL((((@Net_income - @Net_income_py)/@Net_income_py)*1
 end $$
 delimiter ;
  drop table if exists profit_loss_statement;
-
+-- call the P&L for the year chosen (2016) 
 call accounting.profit_and_loss(2016);
-
+ -- select all the elements from the table created
 select * from profit_loss_statement;
+
+
+
+
+
+
+-- BALANCE SHEET -- 
+
+-- As some of the code were not possible to execute into H_Accounting we exported the H_Accounting database and import it into Local Instance. 
+-- we called this new database 'accounting'
+use accounting;
+delimiter $$ 
+
+drop procedure if exists balance_sheet;
+
+-- we created a procedure to build the balance sheet starting doing a table, cleaning data and join them.
+delimiter $$ 
+create procedure balance_sheet(in calendaryear INT)
+begin
+drop table if exists table1;
+create table table1 as (
+	with as1 as (select account, account_id, balance_sheet_order, balance_sheet_section_id
+                  from cloud_account),
+     s as (select statement_section_id, statement_section_code, is_balance_sheet_section, statement_section_order
+                  from cloud_statement_section),   
+     jeli as (select journal_entry_id, account_id, description, ifnull(debit,0) as debit, ifnull(credit,0) as credit
+                  from cloud_journal_entry_line_item),
+	 je as (select journal_entry_id, journal_entry_code, entry_date, debit_credit_balanced, cancelled
+                  from cloud_journal_entry)
+  -- as H_server crashed we had to use also another server called H_cloud. So we imported the database into local instance and renamed the tables cloud_account, cloud_statement_section
+  -- cloud_journal_entry_line_item and cloud_journal_entry
+  
+  SELECT *
+  from as1
+  LEFT JOIN s 
+  on as1.balance_sheet_section_id = s.statement_section_id
+  left join jeli
+  using (account_id)
+  left join je 
+  using (journal_entry_id)
+  );
+  
+  
+  -- now we defined all the assets and liabilities for the current year and previous year as well as the percentage growth. 
+-- ASSETS
+ -- current assets 
+ select (sum(debit) - sum(credit)) INTO @current_assets
+ from table1
+ where balance_sheet_section_id = 61                     -- the number identifies the section of the balance sheet 
+ AND YEAR(entry_date)= calendaryear
+ AND cancelled =0;                                      -- we excluded cancelled operations as they are not part of the BS
+ 
+  -- current assets Y-1
+ select (sum(debit) - sum(credit)) INTO @current_assets_py
+ from table1
+ where balance_sheet_section_id = 61
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+  -- % GROWTH 
+SET @perc_c_asset = IFNULL((((@current_assets - @current_assets_py)/@current_assets_py)*100),0);
+
+
+ -- fixed assets 
+  select (sum(debit) - sum(credit)) INTO @fixed_assets
+ from table1
+ where balance_sheet_section_id = 62
+ AND YEAR(entry_date)= calendaryear
+ AND cancelled =0;
+ 
+  -- fixed assets Y-1 
+  select (sum(debit) - sum(credit)) INTO @fixed_assets_py
+ from table1
+ where balance_sheet_section_id = 62
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+ -- % GROWTH 
+SET @perc_f_asset = IFNULL((((@fixed_assets - @fixed_assets_py)/@fixed_assets_py)*100),0);
+ 
+ 
+ -- deferred assets 
+   select (sum(debit) - sum(credit)) INTO @deferred_assets
+ from table1
+ where balance_sheet_section_id = 63
+ AND YEAR(entry_date)= calendaryear
+ AND cancelled =0;
+ 
+  -- deferred assets Y-1
+   select (sum(debit) - sum(credit)) INTO @deferred_assets_py
+ from table1
+ where balance_sheet_section_id = 63
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+  -- % GROWTH 
+ SET @perc_d_asset = IFNULL((((@deferred_assets - @deferred_assets_py)/@deferred_assets_py)*100),0);
+ 
+ -- TOTAL ASSETS
+  SET @total_assets = ifnull((@current_assets+ @fixed_assets+ @deferred_assets),0);
+  -- TOTAL ASSETS Y-1
+  SET @total_assets_py = ifnull((@current_assets_py+ @fixed_assets_py+ @deferred_assets_py),0);
+  -- % Growth
+  SET @perc_total_assets = IFNULL((((@total_assets - @total_assets_py)/@total_assets_py)*100),0);
+
+
+
+ -- LIABILITIES
+  -- current liabilities 
+   select (sum(credit) - sum(debit)) INTO @current_liabilities
+ from table1
+ where balance_sheet_section_id = 64
+ AND YEAR(entry_date)= calendaryear
+ AND cancelled =0;
+ 
+   -- current liabilities Y-1
+   select (sum(credit) - sum(debit)) INTO @current_liabilities_py
+ from table1
+ where balance_sheet_section_id = 64
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+  -- % GROWTH 
+ SET @perc_c_liabilities = IFNULL((((@current_liabilities - @current_liabilities_py)/@current_liabilitie_py)*100),0);
+ 
+ 
+  -- long term liabilities 
+   select (sum(credit) - sum(debit)) INTO @lt_liabilities
+ from table1
+ where balance_sheet_section_id = 65
+ AND YEAR(entry_date)= calendaryear
+ AND cancelled =0;
+ 
+   -- long term liabilities Y-1
+   select (sum(credit) - sum(debit)) INTO @lt_liabilities_py
+ from table1
+ where balance_sheet_section_id = 65
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+  -- % GROWTH 
+SET @perc_lt_liabilities = IFNULL((((@lt_liabilities - @lt_liabilities_py)/@lt_liabilitie_py)*100),0);
+
+ 
+  -- deferred liabilities 
+   select (sum(credit) - sum(debit)) INTO @deferred_liabilities
+ from table1
+ where balance_sheet_section_id = 66
+ AND YEAR(entry_date)= calendaryear
+ AND cancelled =0;
+ 
+   -- deferred liabilities Y-1
+   select (sum(credit) - sum(debit)) INTO @deferred_liabilities_py
+ from table1
+ where balance_sheet_section_id = 66
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+  -- % GROWTH 
+  SET @perc_d_liabilities = IFNULL((((@deferred_liabilities - @deferred_liabilities_py)/@deferred_liabilitie_py)*100),0);
+ 
+ 
+ -- EQUITY
+  -- equity 
+   select (sum(credit) - sum(debit)) INTO @equity
+ from table1
+ where balance_sheet_section_id = 67
+ AND YEAR(entry_date)= calendaryear
+ AND cancelled =0;
+ 
+  -- equity Y-1
+   select (sum(credit) - sum(debit)) INTO @equity_py
+ from table1
+ where balance_sheet_section_id = 67
+ AND YEAR(entry_date)= calendaryear-1
+ AND cancelled =0;
+ -- % GROWTH 
+ SET @perc_equity = IFNULL((((@equity - @equity_py)/@equity_py)*100),0);
+
+ -- TOTAL LIABILITIES AND EQUITY
+  SET @total_le = ifnull((@current_liabilities+ @lt_liabilities+ @deferred_liabilities + @equity),0);
+  -- TOTAL LIABILITIES AND EQUITY Y-1
+  SET @total_le_py = ifnull((@current_liabilities_py + @lt_liabilities_py + @deferred_liabilities_py + @equity_py),0);
+  -- % Growth
+  SET @perc_total_le = IFNULL((((@total_le - @total_le_py)/@total_le_py)*100),0);
+                
+-- now let's set all the elements we want to include in the BS and create the BS table. 
+ drop table if exists balance_sheet_report;
+ 
+ create table balance_sheet_report 
+				(CATEGORY VARCHAR(50), `YEAR-1` VARCHAR(50), `YEAR` VARCHAR(50), `% GROWTH` VARCHAR(50));   -- define the elements to include
+         
+  INSERT INTO balance_sheet_report(CATEGORY, `YEAR-1` , `YEAR`, `% GROWTH`)                                 -- name them 
+  values ('', '2015' , '2016', ''),
+		('ASSETS','','', ''),
+		('Current Assets', format(coalesce(@current_assets_py,0),0), format(coalesce(@current_assets,0),0), format(coalesce(@perc_c_asset,0),0)),
+        ('Fixed Assets',  format(coalesce(@fixed_assets_py,0),0), format(coalesce(@fixed_assets,0),0), format(coalesce(@perc_f_asset,0),0)),
+        ('Deferred Assets', format(coalesce(@deferred_assets_py,0),0), format(coalesce(@deferred_assets,0),0), format(coalesce(@perc_d_assets,0),0)),
+        ('Total Assets', format(coalesce(@total_assets_py,0),0), format(coalesce(@total_assets,0),0), format(coalesce(@perc_t_assets,0),0)),
+        ('', '','', ''),
+        ('LIABILITIES','','', ''),
+        ('Current Liabilities', format(coalesce(@current_liabilities_py,0),0),  format(coalesce(@current_liabilities,0),0), format(coalesce(@perc_c_liabilities,0),0)),
+        ('Long Term Liabilities', format(coalesce(@lt_liabilities_py,0),0), format(coalesce(@lt_liabilities,0),0), format(coalesce(@perc_lt_liabilities,0),0)),
+        ('Deferred Liabilities',  format(coalesce(@dl_liabilities_py,0),0), format(coalesce(@dl_liabilities,0),0), format(coalesce(@perc_dl_liabilities,0),0)),
+        ('', '','', ''),
+        ('EQUITY','','', ''),
+        ('Equity', format(coalesce(@equity_py,0),0), format(coalesce(@equity,0),0),  format(coalesce(@perc_equity,0),0)),
+        ('Total Equity & Liabilities', format(coalesce(@total_el_py,0),0), format(coalesce(@total_el,0),0), format(coalesce(@perc_t_el,0),0)) ;
+        
+        END $$
+        DELIMITER ;
+  
+drop table if exists balance_sheet_report;
+
+ -- call the BS for the year chosen (2016) 
+call accounting.balance_sheet(2016);
+ 
+ -- select all the elements from the table created
+  select * from balance_sheet_report;
+ 
+
 
